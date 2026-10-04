@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
     """
     Compute the mean squared error using gradient descent.
@@ -20,14 +21,15 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
         e = y - tx.dot(w)
         grad = -tx.T.dot(e) / len(y)
         w -= gamma * grad
-    loss = np.mean(e ** 2) / 2
+    loss = np.mean((y - tx.dot(w)) ** 2) / 2
     return w, loss
+
 
 def mean_squared_error_sgd(y, tx, initial_w, max_iters, gamma):
     """""
     Compute the mean squared error using stochastic gradient descent.
 
-    """""
+    """ ""
     w = initial_w.copy()
 
     for n_iter in range(max_iters):
@@ -38,8 +40,8 @@ def mean_squared_error_sgd(y, tx, initial_w, max_iters, gamma):
     loss = np.mean((y - tx.dot(w)) ** 2) / 2
     return w, loss
 
-def least_squares(y, tx): 
-    
+
+def least_squares(y, tx):
     """
     Compute the least squares solution using the normal equation.
 
@@ -56,7 +58,7 @@ def least_squares(y, tx):
     return w, loss
 
 
-def ridge_regression(y, tx, lambda_) :
+def ridge_regression(y, tx, lambda_):
     """
     Compute the ridge regression solution using the normal equation.
 
@@ -71,8 +73,9 @@ def ridge_regression(y, tx, lambda_) :
     """
     N, D = tx.shape
     w = np.linalg.solve(tx.T.dot(tx) + 2 * N * lambda_ * np.eye(D), tx.T.dot(y))
-    loss = np.mean((y - tx.dot(w)) ** 2) / 2 + lambda_ * np.sum(w ** 2)
+    loss = np.mean((y - tx.dot(w)) ** 2) / 2
     return w, loss
+
 
 def logistic_regression(y, tx, initial_w, max_iters, gamma):
     """
@@ -93,13 +96,15 @@ def logistic_regression(y, tx, initial_w, max_iters, gamma):
     w = initial_w
     for n_iter in range(max_iters):
         pred = 1 / (1 + np.exp(-tx.dot(w)))
-        pred = np.clip(pred, 1e-15, 1 - 1e-15)      # Clip predictions to avoid log(0) and numerical instability
         e = pred - y
         grad = tx.T.dot(e) / len(y)
         w -= gamma * grad
+
+    pred = 1 / (1 + np.exp(-tx.dot(w)))
+    pred = np.clip(pred, 1e-15, 1 - 1e-15)
     loss = -np.mean(y * np.log(pred) + (1 - y) * np.log(1 - pred))
     return w, loss
-   
+
 
 def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
     """
@@ -121,14 +126,11 @@ def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
     w = initial_w
     for n_iter in range(max_iters):
         pred = 1 / (1 + np.exp(-tx.dot(w)))
-        pred = np.clip(pred, 1e-15, 1 - 1e-15)      # Clip predictions to avoid log(0) and numerical instability
         e = pred - y
         grad = tx.T.dot(e) / len(y) + 2 * lambda_ * w
         w -= gamma * grad
-    loss = -np.mean(y * np.log(pred) + (1 - y) * np.log(1 - pred)) + lambda_ * np.sum(w ** 2)
+
+    pred = 1 / (1 + np.exp(-tx.dot(w)))
+    pred = np.clip(pred, 1e-15, 1 - 1e-15)
+    loss = -np.mean(y * np.log(pred) + (1 - y) * np.log(1 - pred))
     return w, loss
-    
-
-
-
-
