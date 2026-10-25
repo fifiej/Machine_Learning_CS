@@ -30,6 +30,8 @@ def compute_groups(x, names):
         "small scale with codes": [],
         "numeric with codes": [],
         "no codes detected": [],
+        # extra list (not a group of its own): columns whose codes are 77/88/99
+        "codes_99_family": [],
     }
     for j, name in enumerate(names):
         col = x[:, j]
@@ -48,6 +50,8 @@ def compute_groups(x, names):
             if len(real_values) > 0 and real_values.max() < min(family):
                 codes = [c for c in family if c in uniques]
                 real_max = real_values.max()
+                if vmax == 99:
+                    groups["codes_99_family"].append(name)
 
         if nan_ratio > 0.9:
             groups["mostly missing (>90% NaN)"].append(name)
@@ -118,13 +122,19 @@ def clean(x, names, groups):
         replace(c, 88, 0)
         set_nan(c, [77, 99])
 
-    # small scales: 7/9 -> NaN (exceptions handled below)
-    special = {"CHECKUP1", "DIABETE3", "BPHIGH4", "INCOME2"}
+    # small scales: remove the "don't know / refused" codes
+    special = {"CHECKUP1", "DIABETE3", "BPHIGH4"}
+    fam99 = set(groups.get("codes_99_family", []))   # codes are 77/99 (e.g. INCOME2, _MRACE1, LASTSMK2)
+    only_9_is_code = {"EMPLOY1", "_RACE"}            # 7 and 8 are real answers here
     for c in groups["small scale with codes"]:
-        if c not in special:
+        if c in special:
+            continue
+        if c in fam99:
+            set_nan(c, [77, 99])
+        elif c in only_9_is_code:
+            set_nan(c, [9])
+        else:
             set_nan(c, [7, 9])
-
-    set_nan("INCOME2", [77, 99])
 
     set_nan("CHECKUP1", [7, 9])
     replace("CHECKUP1", 8, 5)  # 8 = never -> after "5+ years"
