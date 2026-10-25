@@ -320,3 +320,33 @@ def nan_indicators(x_train, x_test, names, min_nan=0.05, max_nan=0.9):
 
     final_names = list(names) + new_names
     return x_train, x_test, final_names
+
+def add_interactions(x_train, x_test, names, pairs, squares):
+    """
+    Add the product of each pair of columns and the square of some columns.
+    Returns new x_train, new x_test, new list of names.
+    """
+    names = list(names)
+    new_tr, new_te, new_names = [], [], []
+
+    for a, b in pairs:
+        if a in names and b in names:
+            ia = names.index(a)
+            ib = names.index(b)
+            new_tr.append(x_train[:, ia] * x_train[:, ib])
+            new_te.append(x_test[:, ia] * x_test[:, ib])
+            new_names.append(f"{a}*{b}")
+
+    for a in squares:
+        if a in names:
+            ia = names.index(a)
+            new_tr.append(x_train[:, ia] ** 2)
+            new_te.append(x_test[:, ia] ** 2)
+            new_names.append(f"{a}^2")
+
+    if new_tr:
+        x_train = np.column_stack([x_train] + new_tr)
+        x_test = np.column_stack([x_test] + new_te)
+
+    final_names = list(names) + new_names
+    return x_train, x_test, final_names
