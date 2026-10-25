@@ -247,7 +247,12 @@ def evaluate(x_feat, y01):
     w = train_logistic(x_tr, y01[i_tr], verbose=False)
 
     t, score = best_threshold(y01[i_val], sigmoid(x_val @ w))
-    print(f"F1 (validation) = {score:.3f}  with threshold {t:.2f}  ({x_feat.shape[1]} columns)")
+    
+    y_pred = (sigmoid(x_val @ w) >= t).astype(int)
+    acc = np.mean(y_pred == y01[i_val])
+    print(f"F1 (validation) = {score:.3f}  accuracy = {acc:.3f}  "
+          f"with threshold {t:.2f}  ({x_feat.shape[1]} columns)")
+
     return score
 
 def one_hot(x_train, x_test, names, columns):
@@ -282,4 +287,36 @@ def one_hot(x_train, x_test, names, columns):
         x_test = np.column_stack([x_test] + new_te)
 
     final_names = [n for i, n in enumerate(names) if i not in to_delete] + new_names
+    return x_train, x_test, final_names
+
+
+def nan_indicators(x_train, x_test, names, min_nan=0.05, max_nan=0.9):
+    """
+    For each column with between min_nan and max_nan missing values
+    (computed on x_train), add a 0/1 column "was missing".
+    Returns new x_train, new x_test, new list of names.
+    """
+    new_tr, new_te, new_names = [], [], []
+
+    # 1. compute the proportion of NaN of each column on x_train
+    # 2. for each column j where this proportion is between min_nan and max_nan:
+    #      - create np.isnan(...).astype(float) for x_train, add it to new_tr
+    #      - same for x_test, add it to new_te
+    #      - add a name like "PHYSHLTH_missing" to new_names
+    # 3. stack the new columns on the right (only if there are some)
+    # 4. build the final list of names
+    for j, c in enumerate(names):
+        nan_col = np.isnan(x_train[:, j]).astype(float)
+        proportion_nan = nan_col.mean()
+
+        if min_nan <= proportion_nan <= max_nan:
+            new_tr.append(nan_col)
+            new_te.append(np.isnan(x_test[:, j]).astype(float))
+            new_names.append(f"{c}_missing")
+
+    if new_tr:
+        x_train = np.column_stack([x_train] + new_tr)
+        x_test = np.column_stack([x_test] + new_te)
+
+    final_names = list(names) + new_names
     return x_train, x_test, final_names
