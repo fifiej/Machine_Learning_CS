@@ -235,3 +235,51 @@ def train_logistic(x, y, gamma=0.1, max_iters=500, lambda_=1e-4, verbose=True):
             loss = -np.mean(y * np.log(p + 1e-15) + (1 - y) * np.log(1 - p + 1e-15))
             print(f"iter {it}: loss = {loss:.4f}")
     return w
+
+def evaluate(x_feat, y01):
+    """Train on 80 %, return the validation F1 and the best threshold."""
+    i_tr, i_val = split_train_val(len(x_feat))
+
+    mean, std = fit_preprocessing(x_feat[i_tr])
+    x_tr = apply_preprocessing(x_feat[i_tr], mean, std)
+    x_val = apply_preprocessing(x_feat[i_val], mean, std)
+
+    w = train_logistic(x_tr, y01[i_tr], verbose=False)
+
+    t, score = best_threshold(y01[i_val], sigmoid(x_val @ w))
+    print(f"F1 (validation) = {score:.3f}  with threshold {t:.2f}  ({x_feat.shape[1]} columns)")
+    return score
+
+def one_hot(x_train, x_test, names, columns):
+    """
+    Replace each column in `columns` by one 0/1 column per category.
+    Categories are found on x_train only, then applied to x_test.
+    Returns new x_train, new x_test, new list of names.
+    """
+    names = list(names)
+    new_tr, new_te, new_names = [], [], []
+    to_delete = []
+
+    for c in columns:
+        if c not in names:
+            continue
+        j = names.index(c)
+        col = x_train[:, j]
+        categories = np.unique(col[~np.isnan(col)])   # found on x_train only
+
+        for v in categories:
+            new_tr.append((col == v).astype(float))
+            new_te.append((x_test[:, j] == v).astype(float))
+            new_names.append(f"{c}={v:g}")
+
+        to_delete.append(j)
+
+    x_train = np.delete(x_train, to_delete, axis=1)
+    x_test = np.delete(x_test, to_delete, axis=1)
+
+    if new_tr:   # only if at least one column was transformed
+        x_train = np.column_stack([x_train] + new_tr)
+        x_test = np.column_stack([x_test] + new_te)
+
+    final_names = [n for i, n in enumerate(names) if i not in to_delete] + new_names
+    return x_train, x_test, final_names
