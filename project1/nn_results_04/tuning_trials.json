@@ -1,0 +1,42 @@
+[
+  {
+    "name": "mlp32_baseline",
+    "config": {
+      "name": "mlp32_baseline",
+      "hidden_size": 64,
+      "learning_rate": 0.001,
+      "l2": 0.0001,
+      "positive_weight": 3.0,
+      "batch_size": 512,
+      "epochs": 5,
+      "seed": 0,
+      "clip": 10.0,
+      "dtype": "float32"
+    },
+    "best_epoch": 5,
+    "threshold": 0.48179149627685547,
+    "tuning": {
+      "tp": 2398,
+      "fp": 4241,
+      "tn": 43625,
+      "fn": 2238,
+      "accuracy": 0.876595177326578,
+      "precision": 0.36119897574935983,
+      "recall": 0.5172562553925798,
+      "specificity": 0.9113984874441148,
+      "f1": 0.4253658536585366
+    },
+    "tuning_at_05": {
+      "tp": 2261,
+      "fp": 3871,
+      "tn": 43995,
+      "fn": 2375,
+      "accuracy": 0.881033103500819,
+      "precision": 0.3687214611872146,
+      "recall": 0.48770491803278687,
+      "specificity": 0.9191284001169933,
+      "f1": 0.4199479940564636
+    },
+    "checkpoint": "mlp32_baseline.npz"
+  }
+]

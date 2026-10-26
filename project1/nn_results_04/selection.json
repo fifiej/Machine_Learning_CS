@@ -1,0 +1,49 @@
+{
+  "kind": "single_neural_network_baseline",
+  "members": [
+    {
+      "name": "mlp32_baseline",
+      "config": {
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "l2": 0.0001,
+        "positive_weight": 3.0,
+        "batch_size": 512,
+        "epochs": 5,
+        "seed": 0,
+        "clip": 10.0,
+        "dtype": "float32"
+      }
+    }
+  ],
+  "threshold": 0.48179149627685547,
+  "tuning_metrics": {
+    "tp": 2398,
+    "fp": 4241,
+    "tn": 43625,
+    "fn": 2238,
+    "accuracy": 0.876595177326578,
+    "precision": 0.36119897574935983,
+    "recall": 0.5172562553925798,
+    "specificity": 0.9113984874441148,
+    "f1": 0.4253658536585366
+  },
+  "preprocess_options": {
+    "categorical_columns": [
+      "SEX",
+      "MARITAL",
+      "EMPLOY1"
+    ],
+    "add_missing_indicators": true,
+    "standardize": true,
+    "add_bias": false
+  },
+  "selection_rule": "one fixed architecture (32 hidden units); early stopping and threshold use tuning data only",
+  "outer_seed": 0,
+  "inner_seed": 1,
+  "sample_counts": {
+    "train": 210006,
+    "tuning": 52502,
+    "holdout": 65627
+  }
+}
