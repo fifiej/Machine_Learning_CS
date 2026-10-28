@@ -5,3 +5,4 @@ submissions/
 submission*.csv
 nn_results*/*.npz
 nn_results*/*.npy
+grading_tests/
