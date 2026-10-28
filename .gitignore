@@ -2,3 +2,6 @@ data/dataset/
 __pycache__/
 .DS_Store
 submissions/
+submission*.csv
+nn_results*/*.npz
+nn_results*/*.npy
