@@ -75,18 +75,58 @@ def compute_groups(x, names):
 # ---------------------------------------------------------------------
 DROP_COLUMNS = {
     # admin / phone
-    "Id", "_STATE", "FMONTH", "IDATE", "IMONTH", "IDAY", "IYEAR", "DISPCODE",
-    "SEQNO", "_PSU", "QSTVER", "QSTLANG", "MSCODE", "NUMADULT", "NUMMEN",
-    "NUMWOMEN", "PVTRESD1", "CELLFON3", "CADULT", "PVTRESD2", "CSTATE",
-    "LANDLINE", "NUMHHOL2", "HHADULT",
+    "Id",
+    "_STATE",
+    "FMONTH",
+    "IDATE",
+    "IMONTH",
+    "IDAY",
+    "IYEAR",
+    "DISPCODE",
+    "SEQNO",
+    "_PSU",
+    "QSTVER",
+    "QSTLANG",
+    "MSCODE",
+    "NUMADULT",
+    "NUMMEN",
+    "NUMWOMEN",
+    "PVTRESD1",
+    "CELLFON3",
+    "CADULT",
+    "PVTRESD2",
+    "CSTATE",
+    "LANDLINE",
+    "NUMHHOL2",
+    "HHADULT",
     # survey weights
-    "_STSTR", "_STRWT", "_RAWRAKE", "_WT2RAKE", "_CLLCPWT", "_LLCPWT",
+    "_STSTR",
+    "_STRWT",
+    "_RAWRAKE",
+    "_WT2RAKE",
+    "_CLLCPWT",
+    "_LLCPWT",
     # complex formats with a clean calculated version
-    "WEIGHT2", "HEIGHT3", "FRUITJU1", "FRUIT1", "FVBEANS", "FVGREEN",
-    "FVORANG", "VEGETAB1", "ALCDAY5", "EXEROFT1", "EXEROFT2", "STRENGTH",
-    "EXERHMM1", "EXERHMM2",
+    "WEIGHT2",
+    "HEIGHT3",
+    "FRUITJU1",
+    "FRUIT1",
+    "FVBEANS",
+    "FVGREEN",
+    "FVORANG",
+    "VEGETAB1",
+    "ALCDAY5",
+    "EXEROFT1",
+    "EXEROFT2",
+    "STRENGTH",
+    "EXERHMM1",
+    "EXERHMM2",
     # activity types, places, dates
-    "EXRACT11", "EXRACT21", "IMFVPLAC", "FLSHTMY2", "HIVTSTD3",
+    "EXRACT11",
+    "EXRACT21",
+    "IMFVPLAC",
+    "FLSHTMY2",
+    "HIVTSTD3",
 }
 
 
@@ -98,11 +138,13 @@ def clean(x, names, groups):
     idx = {n: i for i, n in enumerate(names)}
 
     def set_nan(col, values):
+        """Replace the given special codes of column `col` by NaN."""
         if col in idx:
             j = idx[col]
             x[np.isin(x[:, j], values), j] = np.nan
 
     def replace(col, old, new):
+        """Replace the value `old` of column `col` by `new`."""
         if col in idx:
             j = idx[col]
             x[x[:, j] == old, j] = new
@@ -117,15 +159,24 @@ def clean(x, names, groups):
         replace(c, 2, 0)
 
     # counts of days / drinks / children: 88 -> 0, 77/99 -> NaN
-    for c in ["PHYSHLTH", "MENTHLTH", "POORHLTH", "CHILDREN",
-              "AVEDRNK2", "DRNK3GE5", "MAXDRNKS"]:
+    for c in [
+        "PHYSHLTH",
+        "MENTHLTH",
+        "POORHLTH",
+        "CHILDREN",
+        "AVEDRNK2",
+        "DRNK3GE5",
+        "MAXDRNKS",
+    ]:
         replace(c, 88, 0)
         set_nan(c, [77, 99])
 
     # small scales: remove the "don't know / refused" codes
     special = {"CHECKUP1", "DIABETE3", "BPHIGH4"}
-    fam99 = set(groups.get("codes_99_family", []))   # codes are 77/99 (e.g. INCOME2, _MRACE1, LASTSMK2)
-    only_9_is_code = {"EMPLOY1", "_RACE"}            # 7 and 8 are real answers here
+    fam99 = set(
+        groups.get("codes_99_family", [])
+    )  # codes are 77/99 (e.g. INCOME2, _MRACE1, LASTSMK2)
+    only_9_is_code = {"EMPLOY1", "_RACE"}  # 7 and 8 are real answers here
     for c in groups["small scale with codes"]:
         if c in special:
             continue
@@ -158,7 +209,11 @@ def clean(x, names, groups):
     set_nan("_DRNKWEK", [99900])
     set_nan("MAXVO2_", [99900])
 
-    drop = set(groups["mostly missing (>90% NaN)"]) | set(groups["constant"]) | DROP_COLUMNS
+    drop = (
+        set(groups["mostly missing (>90% NaN)"])
+        | set(groups["constant"])
+        | DROP_COLUMNS
+    )
     keep = [j for j, n in enumerate(names) if n not in drop]
     kept_names = [names[j] for j in keep]
     return x[:, keep], kept_names
@@ -175,6 +230,8 @@ def fit_column_filter(x, max_nan=0.9):
 # 3. Train / validation split (same for everyone)
 # ---------------------------------------------------------------------
 def split_train_val(n, ratio=0.8, seed=SEED):
+    """Random split of the indices 0..n-1 into a training part (ratio) and a
+    validation part (1 - ratio). Returns (train_indices, val_indices)."""
     rng = np.random.default_rng(seed)
     perm = rng.permutation(n)
     cut = int(ratio * n)
@@ -185,6 +242,9 @@ def split_train_val(n, ratio=0.8, seed=SEED):
 # 4. Fill NaNs + standardize (stats from the training part only)
 # ---------------------------------------------------------------------
 def fit_preprocessing(x):
+    """Statistics for imputation and standardization, computed on training data.
+    Returns the column means (ignoring NaNs) and the column standard deviations
+    after mean imputation (1 for constant columns)."""
     mean = np.nanmean(x, axis=0)
     x_filled = np.where(np.isnan(x), mean, x)
     std = x_filled.std(axis=0)
@@ -193,8 +253,10 @@ def fit_preprocessing(x):
 
 
 def apply_preprocessing(x, mean, std):
-    x = np.where(np.isnan(x), mean, x)    # fill NaNs with training mean
-    x = (x - mean) / std                  # standardize
+    """Fill NaNs with the training means, standardize with the training
+    statistics and add a bias column of ones in front."""
+    x = np.where(np.isnan(x), mean, x)  # fill NaNs with training mean
+    x = (x - mean) / std  # standardize
     return np.c_[np.ones(x.shape[0]), x]  # add bias column
 
 
@@ -202,6 +264,7 @@ def apply_preprocessing(x, mean, std):
 # 5. Evaluation
 # ---------------------------------------------------------------------
 def f1(y_true, y_pred):
+    """F1 score for labels in {0, 1}: 2 TP / (2 TP + FP + FN)."""
     tp = np.sum((y_pred == 1) & (y_true == 1))
     fp = np.sum((y_pred == 1) & (y_true == 0))
     fn = np.sum((y_pred == 0) & (y_true == 1))
@@ -222,10 +285,14 @@ def best_threshold(y_true, probs):
 # 6. Baseline model: regularized logistic regression
 # ---------------------------------------------------------------------
 def sigmoid(t):
+    """Logistic function 1 / (1 + exp(-t))."""
     return 1 / (1 + np.exp(-t))
 
 
 def train_logistic(x, y, gamma=0.1, max_iters=500, lambda_=1e-4, verbose=True):
+    """Regularized logistic regression with gradient descent, starting from 0.
+    x must already contain the bias column. Prints the loss every 100
+    iterations if verbose. Returns the weight vector."""
     w = np.zeros(x.shape[1])
     for it in range(max_iters):
         grad = x.T @ (sigmoid(x @ w) - y) / len(y) + 2 * lambda_ * w
@@ -236,8 +303,11 @@ def train_logistic(x, y, gamma=0.1, max_iters=500, lambda_=1e-4, verbose=True):
             print(f"iter {it}: loss = {loss:.4f}")
     return w
 
+
 def evaluate(x_feat, y01):
-    """Train on 80 %, return the validation F1 and the best threshold."""
+    """Quick check of a feature set: train the logistic regression on 80 % of
+    the data, print the validation F1 and accuracy at the best threshold, and
+    return the validation F1."""
     i_tr, i_val = split_train_val(len(x_feat))
 
     mean, std = fit_preprocessing(x_feat[i_tr])
@@ -247,13 +317,16 @@ def evaluate(x_feat, y01):
     w = train_logistic(x_tr, y01[i_tr], verbose=False)
 
     t, score = best_threshold(y01[i_val], sigmoid(x_val @ w))
-    
+
     y_pred = (sigmoid(x_val @ w) >= t).astype(int)
     acc = np.mean(y_pred == y01[i_val])
-    print(f"F1 (validation) = {score:.3f}  accuracy = {acc:.3f}  "
-          f"with threshold {t:.2f}  ({x_feat.shape[1]} columns)")
+    print(
+        f"F1 (validation) = {score:.3f}  accuracy = {acc:.3f}  "
+        f"with threshold {t:.2f}  ({x_feat.shape[1]} columns)"
+    )
 
     return score
+
 
 def one_hot(x_train, x_test, names, columns):
     """
@@ -270,7 +343,7 @@ def one_hot(x_train, x_test, names, columns):
             continue
         j = names.index(c)
         col = x_train[:, j]
-        categories = np.unique(col[~np.isnan(col)])   # found on x_train only
+        categories = np.unique(col[~np.isnan(col)])  # found on x_train only
 
         for v in categories:
             new_tr.append((col == v).astype(float))
@@ -282,7 +355,7 @@ def one_hot(x_train, x_test, names, columns):
     x_train = np.delete(x_train, to_delete, axis=1)
     x_test = np.delete(x_test, to_delete, axis=1)
 
-    if new_tr:   # only if at least one column was transformed
+    if new_tr:  # only if at least one column was transformed
         x_train = np.column_stack([x_train] + new_tr)
         x_test = np.column_stack([x_test] + new_te)
 
@@ -298,13 +371,6 @@ def nan_indicators(x_train, x_test, names, min_nan=0.05, max_nan=0.9):
     """
     new_tr, new_te, new_names = [], [], []
 
-    # 1. compute the proportion of NaN of each column on x_train
-    # 2. for each column j where this proportion is between min_nan and max_nan:
-    #      - create np.isnan(...).astype(float) for x_train, add it to new_tr
-    #      - same for x_test, add it to new_te
-    #      - add a name like "PHYSHLTH_missing" to new_names
-    # 3. stack the new columns on the right (only if there are some)
-    # 4. build the final list of names
     for j, c in enumerate(names):
         nan_col = np.isnan(x_train[:, j]).astype(float)
         proportion_nan = nan_col.mean()
@@ -320,6 +386,7 @@ def nan_indicators(x_train, x_test, names, min_nan=0.05, max_nan=0.9):
 
     final_names = list(names) + new_names
     return x_train, x_test, final_names
+
 
 def add_interactions(x_train, x_test, names, pairs, squares):
     """
@@ -350,3 +417,65 @@ def add_interactions(x_train, x_test, names, pairs, squares):
 
     final_names = list(names) + new_names
     return x_train, x_test, final_names
+
+
+# ---------------------------------------------------------------------
+# 7. Final feature pipeline (used by run.py and the notebooks)
+# ---------------------------------------------------------------------
+# categorical columns without a natural order -> one-hot encoding
+CATEGORICAL = [
+    "MARITAL",
+    "EMPLOY1",
+    "RENTHOM1",
+    "PERSDOC2",
+    "_RACE",
+    "SXORIENT",
+    "TRNSGNDR",
+]
+
+# products of two features and squares (see exploration.ipynb, part 2)
+INTERACTIONS = [
+    ("_AGE80", "BPHIGH4"),  # age x high blood pressure
+    ("_AGE80", "DIABETE3"),  # age x diabetes
+    ("_AGE80", "GENHLTH"),  # age x general health
+    ("_AGE80", "SEX"),  # age x sex
+    ("_AGE80", "CVDSTRK3"),  # age x stroke
+    ("GENHLTH", "DIFFWALK"),  # general health x difficulty walking
+]
+SQUARES = ["_AGE80", "_BMI5"]
+
+
+def build_features(x_train, x_test, names):
+    """Cleaning + column filter + one-hot + interactions.
+    Every rule is learned on x_train only, then applied identically to x_test."""
+    groups = compute_groups(x_train, names)
+    x_tr, kept = clean(x_train, names, groups)
+    x_te, _ = clean(x_test, names, groups)
+
+    keep = fit_column_filter(x_tr)  # drop >90 % NaN and constant columns
+    x_tr, x_te = x_tr[:, keep], x_te[:, keep]
+    kept = [n for n, k in zip(kept, keep) if k]
+
+    x_tr, x_te, kept = one_hot(x_tr, x_te, kept, CATEGORICAL)
+    x_tr, x_te, kept = add_interactions(x_tr, x_te, kept, INTERACTIONS, SQUARES)
+    return x_tr, x_te
+
+
+def drop_duplicate_columns(x_train, x_test):
+    """Remove columns identical to an earlier one (checked on x_train, NaN == NaN).
+    Identical columns (e.g. _CRACE1 == _CPRACE) make X^T X singular."""
+    filled = np.nan_to_num(x_train, nan=-12345.678)
+    _, first = np.unique(filled, axis=1, return_index=True)
+    first = np.sort(first)
+    return x_train[:, first], x_test[:, first]
+
+
+def best_threshold_quantiles(y_true, scores):
+    """Threshold that maximizes F1. The candidates are 100 quantiles of the
+    scores (50 % to 99.5 %), so it works for any score scale."""
+    best_t, best_f = 0.0, -1.0
+    for t in np.quantile(scores, np.linspace(0.50, 0.995, 100)):
+        score = f1(y_true, (scores >= t).astype(int))
+        if score > best_f:
+            best_t, best_f = t, score
+    return best_t, best_f

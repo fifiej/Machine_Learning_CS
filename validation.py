@@ -1,3 +1,9 @@
+"""
+Shared evaluation tools: metrics, F1-optimal threshold, stratified splits,
+k-fold cross-validation and final retraining. Any model can be evaluated
+through a fit_predict(x_train, y_train, x_eval, seed) -> scores function.
+"""
+
 from functools import partial
 from pathlib import Path
 import importlib
@@ -6,104 +12,137 @@ import numpy as np
 SEED = 0
 
 __all__ = [
-    'SEED', 'to_binary', 'predict_labels', 'binary_metrics', 'confusion_matrix',
-    'f1_score', 'best_f1_threshold', 'stratified_k_fold',
-    'stratified_train_val_split', 'save_folds', 'load_folds',
-    'prepare_brfss_pair', 'make_brfss_preprocessor', 'evaluate_holdout',
-    'cross_validate', 'print_cv_summary', 'fit_predict_final',
+    "SEED",
+    "to_binary",
+    "predict_labels",
+    "binary_metrics",
+    "confusion_matrix",
+    "f1_score",
+    "best_f1_threshold",
+    "stratified_k_fold",
+    "stratified_train_val_split",
+    "save_folds",
+    "load_folds",
+    "prepare_brfss_pair",
+    "make_brfss_preprocessor",
+    "evaluate_holdout",
+    "cross_validate",
+    "print_cv_summary",
+    "fit_predict_final",
 ]
 
+
 def _integer(value, name, minimum=0):
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < minimum:
-        raise ValueError(f"{name} doit être un entier >= {minimum}.")
+    """Check that value is an integer >= minimum and return it as int."""
+    if (
+        isinstance(value, (bool, np.bool_))
+        or not isinstance(value, (int, np.integer))
+        or value < minimum
+    ):
+        raise ValueError(f"{name} must be an integer >= {minimum}.")
     return int(value)
 
 
 def _vector(values, name):
+    """Check that values is a non-empty 1D numeric vector without NaN/inf."""
     a = np.asarray(values)
-    if a.ndim != 1 or a.size == 0 or a.dtype.kind not in 'biuf':
-        raise ValueError(f"{name} doit être un vecteur numérique 1D non vide.")
+    if a.ndim != 1 or a.size == 0 or a.dtype.kind not in "biuf":
+        raise ValueError(f"{name} must be a non-empty 1D numeric vector.")
     if not np.isfinite(a).all():
-        raise ValueError(f"{name} contient NaN ou inf.")
+        raise ValueError(f"{name} contains NaN or inf.")
     return a
 
 
 def to_binary(y):
-    """Copie des labels en 0/1 ; rejette notamment le mélange {-1, 0, 1}."""
-    a = _vector(y, 'y')
+    """Copy of the labels as 0/1. Accepts 0/1 or -1/+1, but not a mix of both."""
+    a = _vector(y, "y")
     if not (np.isin(a, [0, 1]).all() or np.isin(a, [-1, 1]).all()):
-        raise ValueError('Labels attendus : 0/1 ou -1/+1, sans mélange des deux.')
+        raise ValueError("Expected labels: 0/1 or -1/+1, not a mix of both.")
     return (a == 1).astype(np.int64)
 
 
 def _scores(scores, n):
-    a = _vector(scores, 'scores').astype(float, copy=False)
+    """Check that scores is a numeric vector of length n; return it as floats."""
+    a = _vector(scores, "scores").astype(float, copy=False)
     if len(a) != n:
-        raise ValueError('scores et labels doivent avoir la même longueur.')
+        raise ValueError("scores and labels must have the same length.")
     return a
 
 
 def _threshold(value):
+    """Check that the threshold is a numeric scalar (not NaN); return a float."""
     a = np.asarray(value)
-    if a.ndim != 0 or a.dtype.kind not in 'iuf' or np.isnan(a):
-        raise ValueError('Le seuil doit être un scalaire numérique, sans NaN.')
+    if a.ndim != 0 or a.dtype.kind not in "iuf" or np.isnan(a):
+        raise ValueError("The threshold must be a numeric scalar, not NaN.")
     return float(a)
 
 
 def predict_labels(scores, threshold=0.5, negative_label=0):
-    """Probabilités : souvent seuil 0.5 ; marges : souvent seuil 0.
+    """Labels from scores: 1 if score >= threshold, else negative_label.
 
-    negative_label=-1 fournit le codage de soumission du projet.
-    Les seuils +/-inf permettent de prédire respectivement aucun/tous positifs.
+    Typical thresholds: 0.5 for probabilities, 0 for margins.
+    negative_label=-1 gives the submission coding of the project.
+    threshold=+inf predicts no positive, threshold=-inf predicts all positive.
     """
-    a = _vector(scores, 'scores')
+    a = _vector(scores, "scores")
     if negative_label not in (0, -1):
-        raise ValueError('negative_label doit valoir 0 ou -1.')
+        raise ValueError("negative_label must be 0 or -1.")
     return np.where(a >= _threshold(threshold), 1, negative_label)
 
 
 def binary_metrics(y_true, y_pred):
-    """TP/FP/TN/FN, accuracy, precision, recall, specificity, F1.
+    """TP/FP/TN/FN, accuracy, precision, recall, specificity and F1.
 
-    Les deux vecteurs peuvent employer des codages différents. Une métrique
-    dont le dénominateur est nul vaut 0. F1 est celui de la classe +1,
-    pas une moyenne macro ou pondérée. Aucun arrondi avant comparaison.
+    The two vectors may use different codings (0/1 or -1/+1). A metric with a
+    zero denominator is 0. F1 is the F1 of the positive class (not a macro or
+    weighted average).
     """
     y, p = to_binary(y_true), to_binary(y_pred)
     if y.shape != p.shape:
-        raise ValueError('y_true et y_pred doivent avoir la même longueur.')
+        raise ValueError("y_true and y_pred must have the same length.")
     tp = int(np.sum((y == 1) & (p == 1)))
     fp = int(np.sum((y == 0) & (p == 1)))
     tn = int(np.sum((y == 0) & (p == 0)))
     fn = int(np.sum((y == 1) & (p == 0)))
+
     def divide(a, b):
+        """a / b, or 0 if b is 0."""
         return float(a / b) if b else 0.0
-    return dict(tp=tp, fp=fp, tn=tn, fn=fn,
-                accuracy=divide(tp + tn, len(y)),
-                precision=divide(tp, tp + fp), recall=divide(tp, tp + fn),
-                specificity=divide(tn, tn + fp), f1=divide(2 * tp, 2 * tp + fp + fn))
+
+    return dict(
+        tp=tp,
+        fp=fp,
+        tn=tn,
+        fn=fn,
+        accuracy=divide(tp + tn, len(y)),
+        precision=divide(tp, tp + fp),
+        recall=divide(tp, tp + fn),
+        specificity=divide(tn, tn + fp),
+        f1=divide(2 * tp, 2 * tp + fp + fn),
+    )
 
 
 def f1_score(y_true, y_pred):
-    return binary_metrics(y_true, y_pred)['f1']
+    """F1 score of the positive class."""
+    return binary_metrics(y_true, y_pred)["f1"]
 
 
 def best_f1_threshold(y_true, scores):
-    """Retourne (seuil, F1 de réglage), recherche exacte en O(n log n).
+    """Return (threshold, F1) maximizing F1, with an exact O(n log n) search.
 
-    Examine toutes les décisions réalisables par score >= seuil, avec les
-    scores égaux traités ensemble. En cas d'égalité, choisit le plus grand
-    seuil candidat (moins de positifs). Les marges hors [0,1] sont acceptées.
-    Le F1 retourné est optimisé sur ces labels : ne pas le présenter comme
-    score de test indépendant. Sans positif réel, retourne (inf, 0).
+    Every decision "score >= threshold" is examined, equal scores being treated
+    together. On ties, the largest threshold (fewest positives) is chosen.
+    Scores outside [0, 1] (margins) are accepted. The returned F1 is optimized
+    on these labels, so it is not an independent test score.
+    Without any true positive, returns (inf, 0).
     """
     y = to_binary(y_true)
     s = _scores(scores, len(y))
-    order = np.argsort(-s, kind='stable')
+    order = np.argsort(-s, kind="stable")
     ranked = s[order]
     ends = np.r_[np.flatnonzero(ranked[:-1] != ranked[1:]), len(y) - 1]
     tp = np.cumsum(y[order], dtype=np.int64)[ends]
-    # 2TP + FP + FN = nombre prédit positif + nombre réellement positif.
+    # 2TP + FP + FN = number predicted positive + number truly positive.
     values = 2.0 * tp / (ends + 1 + int(y.sum()))
     candidates = np.r_[np.inf, ranked[ends]]
     values = np.r_[0.0, values]
@@ -112,245 +151,298 @@ def best_f1_threshold(y_true, scores):
 
 
 def stratified_k_fold(y, n_splits=5, seed=SEED):
-    """Liste de (indices_train, indices_validation), déterministe.
+    """Deterministic stratified k-fold: list of (train_indices, val_indices).
 
-    Chaque observation est validée exactement une fois. Tailles des plis et
-    effectifs par classe diffèrent d'au plus 1. Exige les deux classes et au
-    moins n_splits observations de chacune. Ne modifie pas le RNG global.
-    Le même ordre de lignes, les mêmes labels, seed et n_splits sont requis
-    pour partager exactement les mêmes partitions entre notebooks.
+    Every sample is in exactly one validation fold. Fold sizes and class counts
+    per fold differ by at most 1. Requires both classes, with at least n_splits
+    samples each. Does not change the global random state. The same row order,
+    labels, seed and n_splits give exactly the same folds in every notebook.
     """
     y = to_binary(y)
-    k = _integer(n_splits, 'n_splits', 2)
-    rng = np.random.default_rng(_integer(seed, 'seed'))
+    k = _integer(n_splits, "n_splits", 2)
+    rng = np.random.default_rng(_integer(seed, "seed"))
     counts = np.bincount(y, minlength=2)
     if counts.min() < k:
-        raise ValueError('Chaque classe doit contenir au moins n_splits observations.')
+        raise ValueError("Each class must contain at least n_splits samples.")
     fold_id = np.empty(len(y), dtype=np.int64)
     offset = 0
     for c in (0, 1):
         indices = rng.permutation(np.flatnonzero(y == c))
         fold_id[indices] = (np.arange(len(indices)) + offset) % k
         offset = (offset + len(indices)) % k
-    return [(rng.permutation(np.flatnonzero(fold_id != j)),
-             rng.permutation(np.flatnonzero(fold_id == j))) for j in range(k)]
+    return [
+        (
+            rng.permutation(np.flatnonzero(fold_id != j)),
+            rng.permutation(np.flatnonzero(fold_id == j)),
+        )
+        for j in range(k)
+    ]
 
 
 def stratified_train_val_split(y, val_ratio=0.2, seed=SEED):
-    """Holdout stratifié ; arrondi par classe, au moins un membre de chaque
-    classe dans chaque partie. La proportion réalisée peut différer légèrement
-    de val_ratio, surtout sur de très petits jeux de données.
+    """Stratified train/validation split (rounded per class, at least one sample
+    of each class in each part). The actual proportion can differ slightly
+    from val_ratio, especially on very small datasets.
     """
     y = to_binary(y)
     if not np.isscalar(val_ratio) or not 0 < val_ratio < 1:
-        raise ValueError('val_ratio doit être strictement entre 0 et 1.')
-    rng = np.random.default_rng(_integer(seed, 'seed'))
+        raise ValueError("val_ratio must be strictly between 0 and 1.")
+    rng = np.random.default_rng(_integer(seed, "seed"))
     train, val = [], []
     for c in (0, 1):
         indices = rng.permutation(np.flatnonzero(y == c))
         if len(indices) < 2:
-            raise ValueError('Il faut au moins deux observations de chaque classe.')
-        n_val = min(len(indices) - 1, max(1, int(np.floor(len(indices) * val_ratio + 0.5))))
+            raise ValueError("At least two samples of each class are needed.")
+        n_val = min(
+            len(indices) - 1, max(1, int(np.floor(len(indices) * val_ratio + 0.5)))
+        )
         val.append(indices[:n_val])
         train.append(indices[n_val:])
     return rng.permutation(np.concatenate(train)), rng.permutation(np.concatenate(val))
 
 
 def _matrix(x):
+    """Check that x is a non-empty 2D float matrix without inf (NaN allowed)."""
     a = np.asarray(x, dtype=float)
     if a.ndim != 2 or min(a.shape) == 0 or np.isinf(a).any():
-        raise ValueError('x doit être une matrice 2D non vide, sans inf (NaN acceptés).')
+        raise ValueError("x must be a non-empty 2D matrix without inf (NaN allowed).")
     return a
 
 
 def _validate_folds(folds, y):
+    """Check that the folds form a valid partition of the samples (each sample
+    validated exactly once, both classes in every part); return them as int arrays."""
     result, seen = [], np.zeros(len(y), dtype=int)
     for train, val in folds:
         pair = []
         for indices in (train, val):
             a = np.asarray(indices)
-            if a.ndim != 1 or a.size == 0 or a.dtype.kind not in 'iu':
-                raise ValueError('Les indices doivent être des vecteurs entiers non vides.')
+            if a.ndim != 1 or a.size == 0 or a.dtype.kind not in "iu":
+                raise ValueError("Indices must be non-empty integer vectors.")
             if np.any(a < 0) or np.any(a >= len(y)) or len(np.unique(a)) != len(a):
-                raise ValueError('Indices hors limites ou dupliqués.')
+                raise ValueError("Indices out of range or duplicated.")
             pair.append(a.astype(np.int64, copy=True))
         train, val = pair
         if np.intersect1d(train, val).size or len(train) + len(val) != len(y):
-            raise ValueError('Chaque train doit être le complément exact de sa validation.')
+            raise ValueError(
+                "Each training part must be the exact complement of its validation part."
+            )
         if len(np.unique(y[train])) != 2 or len(np.unique(y[val])) != 2:
-            raise ValueError('Chaque partie doit contenir les deux classes.')
+            raise ValueError("Each part must contain both classes.")
         seen[val] += 1
         result.append((train, val))
     if len(result) < 2 or not np.all(seen == 1):
-        raise ValueError('Chaque observation doit être validée exactement une fois sur >=2 plis.')
+        raise ValueError("Each sample must be validated exactly once, over >= 2 folds.")
     return result
 
 
 def confusion_matrix(y_true, y_pred):
-    """Matrice [[TN, FP], [FN, TP]] ; lignes = réel, colonnes = prédit."""
+    """Matrix [[TN, FP], [FN, TP]]; rows = true class, columns = predicted class."""
     m = binary_metrics(y_true, y_pred)
-    return np.array([[m['tn'], m['fp']], [m['fn'], m['tp']]], dtype=np.int64)
+    return np.array([[m["tn"], m["fp"]], [m["fn"], m["tp"]]], dtype=np.int64)
 
 
 def _ids(sample_ids, n):
+    """Check that sample_ids is a vector of n unique integer or string ids."""
     ids = np.asarray(sample_ids)
-    if ids.ndim != 1 or len(ids) != n or ids.dtype.kind not in 'iuUS':
-        raise ValueError('sample_ids doit être un vecteur d’identifiants entiers ou chaînes.')
+    if ids.ndim != 1 or len(ids) != n or ids.dtype.kind not in "iuUS":
+        raise ValueError("sample_ids must be a vector of integer or string ids.")
     if len(np.unique(ids)) != n:
-        raise ValueError('Les identifiants doivent être uniques.')
+        raise ValueError("Ids must be unique.")
     return ids
 
 
 def save_folds(path, folds, y, sample_ids):
-    """Enregistrer les partitions, leurs labels et IDs, sans écraser un fichier.
+    """Save the folds with their labels and ids (never overwrites a file).
 
-    Le fichier garde aussi l'ordre des indices dans les trains. Les IDs sont
-    obligatoires pour détecter une permutation de lignes, même de même classe.
-    Utiliser les train_ids renvoyés par load_csv_data. Format NumPy sans pickle.
+    The ids (train_ids from load_csv_data) are required to detect any change
+    of row order. NumPy format, without pickle.
     """
     labels = to_binary(y)
     ids = _ids(sample_ids, len(labels))
     partitions = _validate_folds(folds, labels)
-    data = dict(version=np.array(1), labels=labels, sample_ids=ids,
-                n_splits=np.array(len(partitions)))
+    data = dict(
+        version=np.array(1),
+        labels=labels,
+        sample_ids=ids,
+        n_splits=np.array(len(partitions)),
+    )
     for j, (train, val) in enumerate(partitions):
-        data[f'train_{j}'], data[f'val_{j}'] = train, val
-    with Path(path).open('xb') as f:
+        data[f"train_{j}"], data[f"val_{j}"] = train, val
+    with Path(path).open("xb") as f:
         np.savez_compressed(f, **data)
 
 
 def load_folds(path, y, sample_ids):
-    """Lire les partitions et vérifier les labels ET l'ordre exact des IDs."""
+    """Load saved folds and check that the labels and the exact id order match."""
     labels = to_binary(y)
     ids = _ids(sample_ids, len(labels))
     with np.load(path, allow_pickle=False) as data:
-        if data['version'].shape != () or int(data['version']) != 1:
-            raise ValueError('Version de fichier de partitions non prise en charge.')
-        if not np.array_equal(data['labels'], labels) or not np.array_equal(data['sample_ids'], ids):
-            raise ValueError('Labels ou ordre des IDs différents des partitions enregistrées.')
-        k = _integer(data['n_splits'].item(), 'n_splits', 2)
-        partitions = [(data[f'train_{j}'], data[f'val_{j}']) for j in range(k)]
+        if data["version"].shape != () or int(data["version"]) != 1:
+            raise ValueError("Unsupported fold file version.")
+        if not np.array_equal(data["labels"], labels) or not np.array_equal(
+            data["sample_ids"], ids
+        ):
+            raise ValueError("Labels or id order differ from the saved folds.")
+        k = _integer(data["n_splits"].item(), "n_splits", 2)
+        partitions = [(data[f"train_{j}"], data[f"val_{j}"]) for j in range(k)]
     return _validate_folds(partitions, labels)
 
 
 def _names(names, n):
+    """Check that names contains one unique, non-empty name per column."""
     names = list(names)
     if len(names) != n or not all(isinstance(v, str) and v for v in names):
-        raise ValueError('names doit contenir un nom non vide par colonne, sans Id.')
+        raise ValueError(
+            "names must contain one non-empty name per column, without Id."
+        )
     if len(set(names)) != len(names):
-        raise ValueError('Les noms de colonnes doivent être uniques.')
+        raise ValueError("Column names must be unique.")
     return names
 
 
-def prepare_brfss_pair(x_train, x_eval, *, names, clean_data=True,
-                       categorical_columns=(), add_missing_indicators=False,
-                       min_nan=0.05, max_nan=0.9,
-                       interaction_pairs=(), square_columns=(),
-                       standardize=True, add_bias=False,
-                       preprocessing_module=None, return_names=False):
-    """Appliquer le preprocessing.py partagé à une paire train/évaluation.
+def prepare_brfss_pair(
+    x_train,
+    x_eval,
+    *,
+    names,
+    clean_data=True,
+    categorical_columns=(),
+    add_missing_indicators=False,
+    min_nan=0.05,
+    max_nan=0.9,
+    interaction_pairs=(),
+    square_columns=(),
+    standardize=True,
+    add_bias=False,
+    preprocessing_module=None,
+    return_names=False,
+):
+    """Apply the shared preprocessing.py to a (train, evaluation) pair.
 
-    Toutes les décisions apprises utilisent x_train uniquement :
-      1. compute_groups -> clean sur les deux parties (si clean_data=True).
-      2. fit_column_filter sur le train, même masque sur l'évaluation.
-      3. add_interactions sur les variables originales nettoyées.
-      4. nan_indicators AVANT one_hot et imputation.
-      5. one_hot : catégories déterminées sur le train seulement.
-      6. Retrait des colonnes entièrement NaN sur le train, puis
-         fit_preprocessing et apply_preprocessing partagés (imputation MOYENNE).
+    Everything that is learned uses x_train only:
+      1. compute_groups -> clean on both parts (if clean_data=True).
+      2. fit_column_filter on train, same mask on the evaluation part.
+      3. add_interactions on the cleaned original variables.
+      4. nan_indicators BEFORE one_hot and imputation.
+      5. one_hot: categories found on train only.
+      6. Columns entirely NaN on train are removed, then the shared
+         fit_preprocessing / apply_preprocessing (MEAN imputation).
 
-    clean_data=False : pas de nettoyage BRFSS ni de filtre à 90% ; seuls les
-    NaN sont imputés et les colonnes entièrement manquantes retirées. Les
-    expansions restent commandées par leurs options explicites.
-    standardize=False : imputation avec la même moyenne, sans centrer/réduire.
-    add_bias=False convient à un réseau ayant ses propres biais, et aux arbres.
-    add_bias=True convient aux fonctions linéaires sans intercept intégré.
+    clean_data=False: no BRFSS cleaning and no 90 % filter; NaNs are imputed
+    and entirely missing columns removed. Expansions still follow their options.
+    standardize=False: mean imputation only, without centering/scaling.
+    add_bias=False suits a neural network with its own biases, and trees.
+    add_bias=True suits linear functions without a built-in intercept.
 
-    Les interactions précèdent le one-hot ; elles utilisent les noms originaux.
-    Une colonne demandée qui n'existe pas dans names provoque une erreur.
-    Si le nettoyage la supprime dans ce train, son expansion est ignorée comme
-    dans le module partagé. Le nombre de features peut varier entre plis.
+    Interactions come before one-hot and use the original names. A requested
+    column that is not in names raises an error; if cleaning removes it in this
+    training part, its expansion is skipped (as in the shared module), so the
+    number of features can vary between folds. NaN and unseen categories give
+    all-zero dummies. Missing indicators follow the NaN ratios of the TRAIN part.
 
-    NaN et catégories inconnues donnent des dummies toutes à zéro, conformément
-    au one_hot partagé. Les indicateurs ne sont ajoutés que selon les ratios de
-    NaN DU TRAIN. Les règles métier du module partagé sont reprises telles
-    quelles, sans certification de leur justesse sémantique.
-
-    preprocessing_module=None importe 'preprocessing' au moment de l'appel.
-    Retour : (train_transformé, eval_transformé), ou ces deux matrices et les
-    noms finaux si return_names=True. Aucune entrée n'est modifiée.
+    preprocessing_module=None imports 'preprocessing' at call time.
+    Returns (train_transformed, eval_transformed), plus the final names if
+    return_names=True. The inputs are not modified.
     """
     a, b = _matrix(x_train).copy(), _matrix(x_eval).copy()
     if a.shape[1] != b.shape[1]:
-        raise ValueError('Train et évaluation doivent avoir les mêmes colonnes initiales.')
+        raise ValueError(
+            "Train and evaluation parts must have the same initial columns."
+        )
     names = _names(names, a.shape[1])
     categories, squares = list(categorical_columns), list(square_columns)
     pairs = list(interaction_pairs)
     if any(not isinstance(p, (tuple, list)) or len(p) != 2 for p in pairs):
-        raise ValueError('Chaque interaction doit être une paire de noms.')
+        raise ValueError("Each interaction must be a pair of names.")
     requested = categories + squares + [n for pair in pairs for n in pair]
     if any(not isinstance(n, str) or n not in names for n in requested):
-        raise ValueError('Une expansion demandée référence une colonne initiale inconnue.')
+        raise ValueError("A requested expansion refers to an unknown initial column.")
     if len(set(categories)) != len(categories) or len(set(squares)) != len(squares):
-        raise ValueError('Colonnes dupliquées dans les expansions demandées.')
+        raise ValueError("Duplicated columns in the requested expansions.")
     pair_keys = [tuple(sorted(p)) for p in pairs]
-    if len(set(pair_keys)) != len(pair_keys) or any(a == b and a in squares for a, b in pairs):
-        raise ValueError('Interactions dupliquées (y compris carré et produit de soi-même).')
+    if len(set(pair_keys)) != len(pair_keys) or any(
+        a == b and a in squares for a, b in pairs
+    ):
+        raise ValueError(
+            "Duplicated interactions (including a square and the product of a column with itself)."
+        )
     if not (0 <= min_nan <= max_nan <= 1):
-        raise ValueError('Il faut 0 <= min_nan <= max_nan <= 1.')
+        raise ValueError("0 <= min_nan <= max_nan <= 1 is required.")
     module = preprocessing_module
     if module is None:
-        module = importlib.import_module('preprocessing')
-    required = ['fit_preprocessing', 'apply_preprocessing']
+        module = importlib.import_module("preprocessing")
+    required = ["fit_preprocessing", "apply_preprocessing"]
     if clean_data:
-        required += ['compute_groups', 'clean', 'fit_column_filter']
+        required += ["compute_groups", "clean", "fit_column_filter"]
     if categories:
-        required.append('one_hot')
+        required.append("one_hot")
     if add_missing_indicators:
-        required.append('nan_indicators')
+        required.append("nan_indicators")
     if pairs or squares:
-        required.append('add_interactions')
+        required.append("add_interactions")
     absent = [n for n in required if not callable(getattr(module, n, None))]
     if absent:
-        raise ValueError('Mettre à jour preprocessing.py ; fonctions absentes : ' + ', '.join(absent))
+        raise ValueError(
+            "preprocessing.py is missing these functions: " + ", ".join(absent)
+        )
     if clean_data:
         groups = module.compute_groups(a, names)
         a, cleaned_names = module.clean(a, names, groups)
         b, eval_names = module.clean(b, names, groups)
         if cleaned_names != eval_names:
-            raise ValueError('Le nettoyage a produit des colonnes différentes entre train et évaluation.')
+            raise ValueError(
+                "Cleaning produced different columns for the train and evaluation parts."
+            )
         names = cleaned_names
         if a.shape[1]:
             keep = module.fit_column_filter(a)
             a, b = a[:, keep], b[:, keep]
             names = [n for n, selected in zip(names, keep) if selected]
     if a.shape[1] == 0:
-        raise ValueError('Le nettoyage a supprimé toutes les colonnes de ce train.')
+        raise ValueError("Cleaning removed every column of this training part.")
     if pairs or squares:
         a, b, names = module.add_interactions(a, b, names, pairs, squares)
     if add_missing_indicators:
-        a, b, names = module.nan_indicators(a, b, names, min_nan=min_nan, max_nan=max_nan)
+        a, b, names = module.nan_indicators(
+            a, b, names, min_nan=min_nan, max_nan=max_nan
+        )
     if categories:
         a, b, names = module.one_hot(a, b, names, categories)
-    # Un produit peut être entièrement NaN, même si ses facteurs ne le sont pas.
-    # Le module partagé utilise nanmean : retirer ces colonnes avant son fit.
+    # A product can be entirely NaN even if its factors are not; the shared
+    # module uses nanmean, so these columns are removed before fitting it.
     keep = np.any(~np.isnan(a), axis=0)
     a, b = a[:, keep], b[:, keep]
     names = [n for n, selected in zip(names, keep) if selected]
     if not names:
-        raise ValueError('Aucune colonne avec une valeur observée dans ce train.')
+        raise ValueError("No column with an observed value in this training part.")
     _names(names, a.shape[1])
     if np.isinf(a).any() or np.isinf(b).any():
-        raise ValueError('Débordement numérique dans les interactions ou les données.')
+        raise ValueError("Numerical overflow in the interactions or the data.")
     mean, std = module.fit_preprocessing(a)
     mean, std = np.asarray(mean), np.asarray(std)
-    if mean.shape != (a.shape[1],) or std.shape != mean.shape or not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0):
-        raise ValueError('Le prétraitement a produit des moyennes/écarts-types invalides.')
+    if (
+        mean.shape != (a.shape[1],)
+        or std.shape != mean.shape
+        or not np.isfinite(mean).all()
+        or not np.isfinite(std).all()
+        or np.any(std <= 0)
+    ):
+        raise ValueError("Preprocessing produced invalid means / standard deviations.")
     if standardize:
-        a, b = module.apply_preprocessing(a, mean, std), module.apply_preprocessing(b, mean, std)
-        # Contrat de la version fournie : colonne de 1 ajoutée en première position.
-        if a.shape[1] != len(names)+1 or b.shape[1] != len(names)+1 or not np.all(a[:, 0] == 1) or not np.all(b[:, 0] == 1):
-            raise ValueError('apply_preprocessing doit ajouter une colonne de biais en tête.')
+        a, b = module.apply_preprocessing(a, mean, std), module.apply_preprocessing(
+            b, mean, std
+        )
+        # apply_preprocessing adds a column of ones in first position.
+        if (
+            a.shape[1] != len(names) + 1
+            or b.shape[1] != len(names) + 1
+            or not np.all(a[:, 0] == 1)
+            or not np.all(b[:, 0] == 1)
+        ):
+            raise ValueError(
+                "apply_preprocessing must add a bias column in first position."
+            )
         if not add_bias:
             a, b = a[:, 1:], b[:, 1:]
     else:
@@ -358,180 +450,259 @@ def prepare_brfss_pair(x_train, x_eval, *, names, clean_data=True,
         if add_bias:
             a, b = np.c_[np.ones(len(a)), a], np.c_[np.ones(len(b)), b]
     if not np.isfinite(a).all() or not np.isfinite(b).all():
-        raise ValueError('NaN/inf restant après prétraitement.')
-    final_names = (['__bias__'] if add_bias else []) + names
+        raise ValueError("NaN/inf left after preprocessing.")
+    final_names = (["__bias__"] if add_bias else []) + names
     return (a, b, final_names) if return_names else (a, b)
 
 
 def make_brfss_preprocessor(names, **options):
-    """Créer preprocess(train, eval), à passer aux fonctions d'évaluation.
+    """Create preprocess(train, eval) to pass to the evaluation functions.
 
-    Toutes les statistiques sont recalculées uniquement sur le train de CHAQUE
-    appel. Aucun état ajusté n'est partagé entre les plis. Exemple :
+    All statistics are recomputed on the training part of EACH call, so nothing
+    fitted is shared between folds. Example:
         preprocess = make_brfss_preprocessor(names, add_bias=False)
     """
-    if options.get('return_names', False):
-        raise ValueError('Le callback de validation doit retourner deux matrices, sans noms.')
+    if options.get("return_names", False):
+        raise ValueError(
+            "The preprocessing callback must return two matrices, without names."
+        )
     options = options.copy()
-    for key in ('categorical_columns', 'square_columns'):
+    for key in ("categorical_columns", "square_columns"):
         if key in options:
             options[key] = tuple(options[key])
-    if 'interaction_pairs' in options:
-        options['interaction_pairs'] = tuple(tuple(p) for p in options['interaction_pairs'])
+    if "interaction_pairs" in options:
+        options["interaction_pairs"] = tuple(
+            tuple(p) for p in options["interaction_pairs"]
+        )
     return partial(prepare_brfss_pair, names=tuple(names), **options)
 
 
 def _validate_xy(x, y):
+    """Check x (2D matrix) and y (binary labels) and their lengths."""
     x, y = _matrix(x), to_binary(y)
     if len(x) != len(y):
-        raise ValueError('x et y doivent avoir le même nombre de lignes.')
+        raise ValueError("x and y must have the same number of rows.")
     return x, y
 
 
 def _threshold_mode(threshold):
-    if isinstance(threshold, str) and threshold == 'inner':
+    """Return "inner" (threshold tuned inside each fold) or a fixed float."""
+    if isinstance(threshold, str) and threshold == "inner":
         return threshold
     return _threshold(threshold)
 
 
 def _run_model(x_train, y_train, x_eval, fit_predict, preprocess, seed):
+    """Preprocess (on copies), train a fresh model with fit_predict and return
+    its scores on x_eval."""
     a, b = x_train.copy(), x_eval.copy()
     if preprocess is not None:
         a, b = preprocess(a, b)
     a, b = _matrix(a), _matrix(b)
     if len(a) != len(y_train) or len(b) != len(x_eval) or a.shape[1] != b.shape[1]:
-        raise ValueError('Le prétraitement a changé les lignes ou désaligné les colonnes.')
-    # NaN possibles uniquement si un modèle sait explicitement les traiter.
+        raise ValueError("Preprocessing changed the rows or misaligned the columns.")
+    # NaNs are only allowed if the model explicitly handles them.
     return _scores(fit_predict(a, y_train.copy(), b, seed), len(b)).copy()
 
 
-def _evaluate_partition(x, y, train, val, fit_predict, preprocess,
-                        threshold, inner_val_ratio, seeds):
+def _evaluate_partition(
+    x, y, train, val, fit_predict, preprocess, threshold, inner_val_ratio, seeds
+):
+    """Train on `train`, evaluate on `val`. With threshold="inner", the threshold
+    is first tuned on an inner split of `train`. Returns metrics, scores and
+    predictions of the fold."""
     chosen, tuning_f1 = threshold, None
     if isinstance(threshold, str):
         it, iv = stratified_train_val_split(y[train], inner_val_ratio, seeds[0])
-        inner_scores = _run_model(x[train[it]], y[train[it]], x[train[iv]],
-                                  fit_predict, preprocess, seeds[1])
+        inner_scores = _run_model(
+            x[train[it]], y[train[it]], x[train[iv]], fit_predict, preprocess, seeds[1]
+        )
         chosen, tuning_f1 = best_f1_threshold(y[train[iv]], inner_scores)
     scores = _run_model(x[train], y[train], x[val], fit_predict, preprocess, seeds[2])
     pred = predict_labels(scores, chosen)
-    return dict(n_train=len(train), n_val=len(val), threshold=float(chosen),
-                inner_tuning_f1=tuning_f1, metrics=binary_metrics(y[val], pred),
-                scores=scores, predictions=pred)
+    return dict(
+        n_train=len(train),
+        n_val=len(val),
+        threshold=float(chosen),
+        inner_tuning_f1=tuning_f1,
+        metrics=binary_metrics(y[val], pred),
+        scores=scores,
+        predictions=pred,
+    )
 
 
 def _seeds(seed, count):
-    sequence = np.random.SeedSequence(_integer(seed, 'seed'))
+    """`count` independent integer seeds derived from `seed`."""
+    sequence = np.random.SeedSequence(_integer(seed, "seed"))
     return [int(c.generate_state(1)[0]) for c in sequence.spawn(count)]
 
 
-def evaluate_holdout(x, y, fit_predict, *, split=None, val_ratio=0.2,
-                     seed=SEED, preprocess=None, threshold=0.5,
-                     inner_val_ratio=0.2):
-    """Essai rapide sur un seul train/validation stratifié.
+def evaluate_holdout(
+    x,
+    y,
+    fit_predict,
+    *,
+    split=None,
+    val_ratio=0.2,
+    seed=SEED,
+    preprocess=None,
+    threshold=0.5,
+    inner_val_ratio=0.2,
+):
+    """Quick evaluation on a single stratified train/validation split.
 
-    split=(indices_train, indices_val), par exemple folds[0], permet de partager
-    exactement le même holdout. Sinon il est créé avec val_ratio et seed.
-    Chaque partie doit être le complément de l'autre et avoir les deux classes.
-    threshold='inner' : deux entraînements et réglage interne du seuil.
-    Le résultat contient métriques, scores, prédictions et indices originaux.
+    split=(train_indices, val_indices), e.g. folds[0], reuses exactly the same
+    holdout; otherwise it is created with val_ratio and seed. Each part must be
+    the complement of the other and contain both classes.
+    threshold='inner': two trainings, with the threshold tuned internally.
+    The result contains metrics, scores, predictions and the original indices.
     """
     x, y = _validate_xy(x, y)
     chosen_mode = _threshold_mode(threshold)
     if split is None:
         split = stratified_train_val_split(y, val_ratio, seed)
-    # Les deux plis complémentaires permettent de réutiliser la vérification.
+    # The two complementary folds let us reuse the fold checks.
     train, val = _validate_folds([split, (split[1], split[0])], y)[0]
-    result = _evaluate_partition(x, y, train, val, fit_predict, preprocess,
-                                 chosen_mode, inner_val_ratio, _seeds(seed, 3))
+    result = _evaluate_partition(
+        x,
+        y,
+        train,
+        val,
+        fit_predict,
+        preprocess,
+        chosen_mode,
+        inner_val_ratio,
+        _seeds(seed, 3),
+    )
     result.update(train_indices=train, val_indices=val)
     return result
 
 
-def cross_validate(x, y, fit_predict, *, n_splits=5, seed=SEED,
-                   folds=None, preprocess=None, threshold=0.5,
-                   inner_val_ratio=0.2, verbose=False):
-    """Validation croisée ; prétraitement réajusté dans chaque train.
+def cross_validate(
+    x,
+    y,
+    fit_predict,
+    *,
+    n_splits=5,
+    seed=SEED,
+    folds=None,
+    preprocess=None,
+    threshold=0.5,
+    inner_val_ratio=0.2,
+    verbose=False,
+):
+    """k-fold cross-validation; the preprocessing is refitted on each training part.
 
-    fit_predict(x_train, y_train_01, x_eval, seed) -> scores 1D, modèle neuf.
-    preprocess(train_raw, eval_raw) -> deux matrices ; None transmet le brut.
-    threshold : scalaire fixé à l'avance, ou 'inner' pour un réglage interne.
-    folds : partitions communes facultatives, intégralement vérifiées.
+    fit_predict(x_train, y_train_01, x_eval, seed) -> 1D scores, from a new model.
+    preprocess(train_raw, eval_raw) -> two matrices; None passes the raw data.
+    threshold: fixed scalar, or 'inner' to tune it inside each fold.
+    folds: optional shared folds (fully checked).
 
-    Retour : résultats par pli, moyenne/écart-type descriptif (ddof=0), scores
-    et prédictions out-of-fold dans l'ordre ORIGINAL, métriques OOF agrégées.
-    F1 moyen et F1 agrégé sont distincts. L'écart-type n'est pas un intervalle
-    de confiance. Les scores de modèles différents ne sont pas nécessairement
-    calibrés pareil : les prédictions OOF utilisent le seuil de leur propre pli.
+    Returns the per-fold results, the mean and standard deviation (ddof=0) of
+    the metrics, the out-of-fold scores and predictions in the ORIGINAL order,
+    and the aggregated out-of-fold metrics. Mean F1 and aggregated F1 differ.
 
-    threshold='inner' coûte 2 entraînements par pli ; le modèle final de chaque
-    pli utilise tout le train externe. Le changement de calibration après ce
-    réentraînement peut dégrader le seuil choisi : le score externe mesure
-    honnêtement cette procédure. La fonction ne choisit pas un modèle gagnant.
+    threshold='inner' costs 2 trainings per fold: the threshold is tuned on an
+    inner split, then the model is retrained on the whole training part, so the
+    outer score honestly measures this whole procedure.
     """
     x, y = _validate_xy(x, y)
     mode = _threshold_mode(threshold)
     partitions = _validate_folds(
-        stratified_k_fold(y, n_splits, seed) if folds is None else folds, y)
-    seeds = _seeds(seed, 3*len(partitions))
+        stratified_k_fold(y, n_splits, seed) if folds is None else folds, y
+    )
+    seeds = _seeds(seed, 3 * len(partitions))
     oof_scores, oof_pred = np.empty(len(y)), np.empty(len(y), dtype=int)
     oof_fold = np.empty(len(y), dtype=int)
     results = []
     for j, (train, val) in enumerate(partitions):
-        result = _evaluate_partition(x, y, train, val, fit_predict, preprocess,
-                                     mode, inner_val_ratio, seeds[3*j:3*j+3])
-        oof_scores[val] = result.pop('scores')
-        oof_pred[val] = result.pop('predictions')
+        result = _evaluate_partition(
+            x,
+            y,
+            train,
+            val,
+            fit_predict,
+            preprocess,
+            mode,
+            inner_val_ratio,
+            seeds[3 * j : 3 * j + 3],
+        )
+        oof_scores[val] = result.pop("scores")
+        oof_pred[val] = result.pop("predictions")
         oof_fold[val] = j
-        result['fold'] = j
+        result["fold"] = j
         results.append(result)
         if verbose:
-            print(f"Pli {j+1}/{len(partitions)} : F1={result['metrics']['f1']:.4f}, "
-                  f"seuil={result['threshold']:.6g}", flush=True)
-    keys = ('accuracy', 'precision', 'recall', 'specificity', 'f1')
-    mean = {k: float(np.mean([r['metrics'][k] for r in results])) for k in keys}
-    std = {k: float(np.std([r['metrics'][k] for r in results])) for k in keys}
-    return dict(folds=results, mean=mean, std=std, oof_scores=oof_scores,
-                oof_predictions=oof_pred, oof_fold=oof_fold,
-                oof_metrics=binary_metrics(y, oof_pred))
+            print(
+                f"Fold {j+1}/{len(partitions)}: F1={result['metrics']['f1']:.4f}, "
+                f"threshold={result['threshold']:.6g}",
+                flush=True,
+            )
+    keys = ("accuracy", "precision", "recall", "specificity", "f1")
+    mean = {k: float(np.mean([r["metrics"][k] for r in results])) for k in keys}
+    std = {k: float(np.std([r["metrics"][k] for r in results])) for k in keys}
+    return dict(
+        folds=results,
+        mean=mean,
+        std=std,
+        oof_scores=oof_scores,
+        oof_predictions=oof_pred,
+        oof_fold=oof_fold,
+        oof_metrics=binary_metrics(y, oof_pred),
+    )
 
 
 def print_cv_summary(result):
-    """Afficher les métriques de cross_validate sans arrondir les données stockées."""
-    print('Pli   F1       Précision  Rappel    Accuracy  Seuil')
-    for r in result['folds']:
-        m = r['metrics']
-        print(f"{r['fold']+1:>3}   {m['f1']:.4f}   {m['precision']:.4f}     "
-              f"{m['recall']:.4f}    {m['accuracy']:.4f}    {r['threshold']:.6g}")
-    print(f"F1 moyen : {result['mean']['f1']:.4f} ; écart-type : {result['std']['f1']:.4f}")
-    print(f"F1 OOF agrégé : {result['oof_metrics']['f1']:.4f}")
+    """Print the per-fold metrics of cross_validate and their mean."""
+    print("Fold  F1       Precision  Recall    Accuracy  Threshold")
+    for r in result["folds"]:
+        m = r["metrics"]
+        print(
+            f"{r['fold']+1:>3}   {m['f1']:.4f}   {m['precision']:.4f}     "
+            f"{m['recall']:.4f}    {m['accuracy']:.4f}    {r['threshold']:.6g}"
+        )
+    print(f"Mean F1: {result['mean']['f1']:.4f}; std: {result['std']['f1']:.4f}")
+    print(f"Aggregated out-of-fold F1: {result['oof_metrics']['f1']:.4f}")
 
 
-def fit_predict_final(x_train, y_train, x_test, fit_predict, *, preprocess=None,
-                      threshold=0.5, seed=SEED, inner_val_ratio=0.2,
-                      negative_label=-1):
-    """Réentraîner sur tout le train et prédire le test dans son ordre original.
+def fit_predict_final(
+    x_train,
+    y_train,
+    x_test,
+    fit_predict,
+    *,
+    preprocess=None,
+    threshold=0.5,
+    seed=SEED,
+    inner_val_ratio=0.2,
+    negative_label=-1,
+):
+    """Retrain on the whole training set and predict the test set (original order).
 
-    Seuil numérique fixé à partir du développement, ou 'inner' pour sélectionner
-    le seuil sur un holdout interne avant réentraînement complet. Le F1 interne
-    renvoyé est un score de réglage, jamais un F1 du test. Aucun label de test
-    n'est nécessaire. Aucun CSV ni envoi réseau n'est effectué.
+    threshold: fixed number chosen during development, or 'inner' to choose it
+    on an inner holdout before the full retraining. The returned inner F1 is a
+    tuning score, never a test F1. No test labels are needed, no file is written.
 
-    Retour : scores, predictions (-1/+1 par défaut), threshold, inner_tuning_f1.
-    Le modèle n'est pas conservé : l'interface fit_predict ne le retourne pas.
+    Returns scores, predictions (-1/+1 by default), threshold, inner_tuning_f1.
     """
     x_train, y = _validate_xy(x_train, y_train)
     x_test = _matrix(x_test)
     if x_train.shape[1] != x_test.shape[1]:
-        raise ValueError('Le train et le test doivent avoir les mêmes colonnes initiales.')
+        raise ValueError("Train and test must have the same initial columns.")
     if negative_label not in (0, -1):
-        raise ValueError('negative_label doit valoir 0 ou -1.')
+        raise ValueError("negative_label must be 0 or -1.")
     chosen, tuning_f1 = _threshold_mode(threshold), None
     seeds = _seeds(seed, 3)
     if isinstance(chosen, str):
         it, iv = stratified_train_val_split(y, inner_val_ratio, seeds[0])
-        s = _run_model(x_train[it], y[it], x_train[iv], fit_predict, preprocess, seeds[1])
+        s = _run_model(
+            x_train[it], y[it], x_train[iv], fit_predict, preprocess, seeds[1]
+        )
         chosen, tuning_f1 = best_f1_threshold(y[iv], s)
     scores = _run_model(x_train, y, x_test, fit_predict, preprocess, seeds[2])
-    return dict(scores=scores, predictions=predict_labels(scores, chosen, negative_label),
-                threshold=float(chosen), inner_tuning_f1=tuning_f1)
+    return dict(
+        scores=scores,
+        predictions=predict_labels(scores, chosen, negative_label),
+        threshold=float(chosen),
+        inner_tuning_f1=tuning_f1,
+    )

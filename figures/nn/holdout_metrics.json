@@ -34,5 +34,5 @@
   },
   "threshold": 0.48179149627685547,
   "n": 65627,
-  "note": "Configuration, époques, ensemble et seuil figés avant cette évaluation."
+  "note": "Configuration, epochs, ensemble and threshold were frozen before this evaluation."
 }

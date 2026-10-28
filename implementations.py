@@ -1,3 +1,10 @@
+"""
+The 6 required methods of Project 1 (linear regression with GD / SGD, least
+squares, ridge regression, logistic regression and regularized logistic
+regression). Every function returns (w, loss): the last weight vector and its
+loss, without the regularization term for the regularized methods.
+"""
+
 import numpy as np
 
 
@@ -8,15 +15,16 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
     Args:
         y (np.array): target values
         tx (np.array): input features
-        initial w (np.array): initial weights
-        max iters (int): maximum number of iterations
+        initial_w (np.array): initial weights
+        max_iters (int): maximum number of iterations
         gamma (float): learning rate
 
     Returns:
         w (np.array): optimized weights
         loss (float): final loss value
     """
-    w = initial_w
+    # copy, so the caller's initial_w is left unchanged
+    w = np.array(initial_w, dtype=float)
     for n_iter in range(max_iters):
         e = y - tx.dot(w)
         grad = -tx.T.dot(e) / len(y)
@@ -26,12 +34,23 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
 
 
 def mean_squared_error_sgd(y, tx, initial_w, max_iters, gamma):
-    """""
-    Compute the mean squared error using stochastic gradient descent.
+    """
+    Compute the mean squared error using stochastic gradient descent
+    (mini-batch size 1: one random data point per step).
 
-    """ ""
-    w = initial_w.copy()
+    Args:
+        y (np.array): target values
+        tx (np.array): input features
+        initial_w (np.array): initial weights
+        max_iters (int): number of SGD steps
+        gamma (float): learning rate
 
+    Returns:
+        w (np.array): optimized weights
+        loss (float): final loss value (on the whole dataset)
+    """
+    # copy, so the caller's initial_w is left unchanged
+    w = np.array(initial_w, dtype=float)
     for n_iter in range(max_iters):
         i = np.random.randint(len(y))
         e = y[i] - tx[i].dot(w)
@@ -85,15 +104,16 @@ def logistic_regression(y, tx, initial_w, max_iters, gamma):
     Args:
         y (np.array): target values
         tx (np.array): input features
-        initial w (np.array): initial weights
-        max iters (int): maximum number of iterations
+        initial_w (np.array): initial weights
+        max_iters (int): maximum number of iterations
         gamma (float): learning rate
 
     Returns:
         w (np.array): optimized weights
         loss (float): final loss value
     """
-    w = initial_w
+    # copy, so the caller's initial_w is left unchanged
+    w = np.array(initial_w, dtype=float)
     for n_iter in range(max_iters):
         pred = 1 / (1 + np.exp(-tx.dot(w)))
         e = pred - y
@@ -109,21 +129,23 @@ def logistic_regression(y, tx, initial_w, max_iters, gamma):
 def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
     """
     Compute the regularized logistic regression solution using gradient descent.
-    y is between 0 and 1. The regularization term is added to the loss function and the gradient.
+    y is between 0 and 1. The penalty lambda_ * ||w||^2 is used in the gradient,
+    but the returned loss does not include it.
 
     Args:
         y (np.array): target values
         tx (np.array): input features
         lambda_ (float): regularization parameter
-        initial w (np.array): initial weights
-        max iters (int): maximum number of iterations
+        initial_w (np.array): initial weights
+        max_iters (int): maximum number of iterations
         gamma (float): learning rate
 
     Returns:
         w (np.array): optimized weights
         loss (float): final loss value
     """
-    w = initial_w
+    # copy, so the caller's initial_w is left unchanged
+    w = np.array(initial_w, dtype=float)
     for n_iter in range(max_iters):
         pred = 1 / (1 + np.exp(-tx.dot(w)))
         e = pred - y
