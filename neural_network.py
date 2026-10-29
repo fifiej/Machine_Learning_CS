@@ -543,7 +543,7 @@ def tune_models(x, y, names, shared, result_dir, candidates=None):
         write_json(result_dir / "tuning_trials.json", rows)
         return row
 
-    for candidate in (CANDIDATES if candidates is None else candidates):
+    for candidate in CANDIDATES if candidates is None else candidates:
         train_candidate(candidate, SEED, candidate["name"])
     # select a network; the linear candidate is only kept as a reference
     neural = [i for i, r in enumerate(rows) if r["config"]["hidden_size"] > 0]
