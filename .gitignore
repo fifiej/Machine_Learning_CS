@@ -1,6 +1,15 @@
+# Dataset files are supplied separately and must not be submitted
 data/dataset/
+data/dataset_to_release.zip
+
+# Local Python environments and generated caches
+.venv/
 __pycache__/
+.pytest_cache/
 .DS_Store
+/project1/
+
+# Generated predictions and experiment artifacts
 submissions/
 submission*.csv
 nn_results*/*.npz
