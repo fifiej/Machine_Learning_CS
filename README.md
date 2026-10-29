@@ -16,25 +16,21 @@ This project predicts the positive heart-disease label from health and lifestyle
 | `linear_models.ipynb` | Comparison of the six required methods. |
 | `nonlinear_models.ipynb` | Decision trees, forests, boosting, ensembles, and neural-network experiments. |
 | `cv_final.ipynb` | Five-fold cross-validation for the final logistic pipeline. |
-| `data/dataset_to_release.zip` | Provided dataset archive. Extracted data is local and ignored by Git. |
+| `data/dataset_to_release.zip` | Course-provided archive, kept locally only and excluded from the submission. |
 | `report/report.pdf` | Project report; its LaTeX source is in `report/report.tex`. |
 | `figures/` | Figures and selected experiment summaries used by the report. |
 
 ## Setup and data
 
-Use the course Python environment, or install the packages needed for the scripts and notebooks:
+Use the course Python environment. The scripts need NumPy; notebooks also use Jupyter and Matplotlib. If needed, install them with `python -m pip install numpy matplotlib jupyter`.
 
-```bash
-python -m pip install numpy matplotlib jupyter
-```
-
-From the repository root, extract the provided dataset:
+The dataset is supplied separately by the course and must not be included in the Git submission. Place the archive locally at `data/dataset_to_release.zip`, then, from the repository root, extract it with:
 
 ```bash
 unzip data/dataset_to_release.zip -d data
 ```
 
-This creates `data/dataset/`, which must contain `x_train.csv`, `y_train.csv`, `x_test.csv`, and `sample_submission.csv`. Keep the supplied filenames and IDs unchanged. The extracted data should not be committed.
+The code expects `data/dataset/x_train.csv`, `y_train.csv`, `x_test.csv`, and `sample_submission.csv`. Keep the provided filenames and IDs unchanged. Both the archive and extracted data are ignored by Git.
 
 ## Data preparation and features
 
@@ -94,6 +90,12 @@ python neural_network.py --stage baseline --project-dir . --cache-dir work/nn_ca
 ```
 
 Use a new result directory for each run. For the full tuning, frozen holdout evaluation, and final prediction workflow, use `--stage all` and a fresh result directory. Neural-network CSVs are saved inside that result directory; the script does not upload them to AIcrowd.
+
+## Tests and final checks
+
+The course public tests are provided outside this repository. Run them from their `grading_tests/` directory with `pytest --github_link <GITHUB-REPO-URL> .`; for local development, the tests also accept a local checkout path (the GitHub URL-format check is then not applicable). The tests check the six required function names/signatures, documentation strings, and numerical outputs.
+
+Before submission, confirm that the exact GitHub commit URL passes the official tests, `README.md`, `run.py`, and `implementations.py` are at the repository root, generated files and virtual environments are not tracked, and no dataset files are included.
 
 ## Reproducibility notes
 
